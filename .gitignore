@@ -14,10 +14,5 @@ build/
 dist/
 *.spec
 
-# --- Archivos locales ---
-*.xlsx
-*.ico
-*.txt
-
 # --- Configuración de entorno ---
 .env
