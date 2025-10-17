@@ -598,14 +598,29 @@ def mostrar_app():
         root.iconbitmap('icono.ico')
     except:
         pass
-    root.geometry("820x430")
+
+    # ⬇️ Ventana más pequeña (y cómoda)
+    root.geometry("640x360")    # antes: 820x430
+    root.minsize(600, 340)      # límite mínimo para que no se desarme
 
     ramo_label = StringVar(value="(sin ramo)")
-    Label(root, text="Analizador de Cláusulas", font=("Arial", 16, "bold")).pack(pady=(12, 4))
-    Label(root, text="Compara títulos de un Excel base vs el PDF de la póliza.", font=("Arial", 11)).pack()
-    Label(root, text="Versión 3.1 (multi-ramo)", font=("Arial", 10)).pack(pady=(2, 8))
 
-    # Botones de acción (dos ramas)
+    # Encabezados
+    Label(root, text="Analizador de Cláusulas", font=("Arial", 15, "bold")).pack(pady=(10, 2))
+    Label(root, text="Compara títulos del Excel base vs el PDF de la póliza.", font=("Arial", 10)).pack()
+
+    # 🔸 Texto original / tagline
+    Label(
+        root,
+        text="Tip: si cambias de ramo, cambia el Excel base.\nYo me encargo del resto 😉",
+        font=("Arial", 9, "italic"),
+        fg="#555"
+    ).pack(pady=(4, 8))
+
+    # Versión (pequeño)
+    Label(root, text="Versión 3.1 (multi-ramo)", font=("Arial", 9)).pack()
+
+    # Botones (más compactos)
     def _go_mrc():
         ramo_label.set("MRC")
         seleccionar_pdf_y_procesar(MRC_BASE, ramo_label)
@@ -614,23 +629,38 @@ def mostrar_app():
         ramo_label.set("Transporte")
         seleccionar_pdf_y_procesar(TTE_BASE, ramo_label)
 
-    Button(root, text="📄 Analizar MRC", command=_go_mrc, font=("Arial", 12, "bold"),
-           bg="#0070C0", fg="white", padx=20, pady=10).pack(pady=(18, 6))
+    Button(
+        root, text="📄 Analizar MRC", command=_go_mrc,
+        font=("Arial", 11, "bold"), bg="#0070C0", fg="white",
+        padx=16, pady=8
+    ).pack(pady=(14, 6))
 
-    Button(root, text="🚚 Analizar Transporte", command=_go_tte, font=("Arial", 12, "bold"),
-           bg="#0B7F3F", fg="white", padx=20, pady=10).pack(pady=6)
+    Button(
+        root, text="🚚 Analizar Transporte", command=_go_tte,
+        font=("Arial", 11, "bold"), bg="#0B7F3F", fg="white",
+        padx=16, pady=8
+    ).pack(pady=4)
 
-    Label(root, textvariable=ramo_label, font=("Arial", 10, "italic"), fg="gray").pack(pady=(4, 2))
+    # Ramo activo
+    Label(root, textvariable=ramo_label, font=("Arial", 9, "italic"), fg="gray").pack(pady=(6, 2))
 
-    # Barra de progreso (tema azul por defecto)
+    # Barra de progreso más corta
     style = ttk.Style()
     style.theme_use('default')
     style.configure("blue.Horizontal.TProgressbar", background='#0070C0', troughcolor='#e0e0e0')
 
-    progress_bar = ttk.Progressbar(root, orient="horizontal", length=320, mode="determinate",
-                                   style="blue.Horizontal.TProgressbar")
+    progress_bar = ttk.Progressbar(
+        root, orient="horizontal", length=260, mode="determinate",
+        style="blue.Horizontal.TProgressbar"
+    )
 
-
+    # Nota final (muy breve)
+    Label(
+        root,
+        text="Requisitos: base_clausulas_mrc.xlsx / base_clausulas_transporte.xlsx en la misma carpeta.",
+        font=("Arial", 8),
+        fg="#777", wraplength=560, justify="center"
+    ).pack(pady=(8, 0))
 
     root.mainloop()
 
