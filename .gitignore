@@ -1,0 +1,23 @@
+# --- Python básico ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# --- Entornos virtuales ---
+.venv/
+venv/
+
+# --- PyInstaller ---
+build/
+dist/
+*.spec
+
+# --- Archivos locales ---
+*.xlsx
+*.ico
+*.txt
+
+# --- Configuración de entorno ---
+.env
