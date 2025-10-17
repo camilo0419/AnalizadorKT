@@ -4,7 +4,7 @@ import threading
 import logging
 import unicodedata
 import pandas as pd
-from tkinter import filedialog, Tk, Button, Label, messagebox, ttk, Entry, Toplevel
+from tkinter import filedialog, Tk, Button, Label, messagebox, ttk, Entry, Toplevel, StringVar
 from pdfminer.high_level import extract_text
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -14,7 +14,9 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 # =========================
 # Configuración general
 # =========================
-EXCEL_BASE = "base_clausulas.xlsx"
+# Ahora no usamos una sola constante EXCEL_BASE; se pasa por parámetro según botón.
+MRC_BASE = "base_clausulas_mrc.xlsx"
+TTE_BASE = "base_clausulas_transporte.xlsx"
 
 # Silenciar mensajes ruidosos de pdfminer
 for name in ["pdfminer", "pdfminer.layout", "pdfminer.converter", "pdfminer.image", "pdfminer.pdfinterp"]:
@@ -361,7 +363,7 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
 
     titles = df["Multiriesgo Corporativo"].fillna("").astype(str).tolist()
     texts  = df["Texto de la cláusula"].fillna("").astype(str).tolist()
-    # NUEVO: Observaciones del Excel base (si no existe, lista vacía con cadenas)
+    # Observaciones del Excel base (si no existe, lista vacía con cadenas)
     if "Observaciones" in df.columns:
         base_obs = df["Observaciones"].fillna("").astype(str).tolist()
     else:
@@ -399,7 +401,6 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
         else:
             indice = "N/A"; pos = float('inf'); obs = ""
 
-        # OBSERVACIONES ahora viene del Excel base
         obs_base = base_obs[idx] if idx < len(base_obs) else ""
 
         resultados.append({
@@ -409,10 +410,8 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
             "Encontrado": "Sí" if found else "No",
             "Tipo de operación": "",
             "Valor Asegurado": "",
-            # Observaciones del Excel base
             "Observaciones": obs_base,
-            # NUEVO: tu señal (Exacta/Robusta/Footer) se mueve a "Compatibilidad"
-            "Compatibilidad": obs,
+            "Compatibilidad": obs,   # Exacta / Robusta / Footer
             "Posicion": pos,
             "OrdenBase": idx
         })
@@ -420,14 +419,11 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
     resultados.sort(key=lambda x: (x["Encontrado"] != "Sí", x["Posicion"], x["OrdenBase"]))
     return resultados, len(titles), found_total
 
-
 # =========================
 # Guardado en Excel (tabla SIN color de fondo; encabezado azul)
 # =========================
 def guardar_resultados_en_excel(resultados, nombre_salida):
     df_salida = pd.DataFrame(resultados)
-
-    # Agregamos "Compatibilidad" al final y mantenemos "Observaciones" (del base)
     columnas_finales = [
         "Indice de Orden",
         "Multiriesgo Corporativo",
@@ -435,8 +431,8 @@ def guardar_resultados_en_excel(resultados, nombre_salida):
         "Encontrado",
         "Tipo de operación",
         "Valor Asegurado",
-        "Observaciones",     # del Excel base
-        "Compatibilidad"     # Exacta / Robusta / Footer (tu métrica)
+        "Observaciones",
+        "Compatibilidad"
     ]
     df_salida = df_salida[columnas_finales]
     df_salida.to_excel(nombre_salida, index=False)
@@ -464,7 +460,6 @@ def guardar_resultados_en_excel(resultados, nombre_salida):
         cell.fill = fill_header
         cell.alignment = align_center
 
-    # Añadimos un ancho extra para "Compatibilidad"
     widths = [15, 40, 100, 15, 20, 20, 25, 20]
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
@@ -478,17 +473,16 @@ def guardar_resultados_en_excel(resultados, nombre_salida):
     wb.save(nombre_salida)
     return nombre_salida
 
-
 # =========================
 # Hilo y GUI
 # =========================
-def run_analysis_thread(ruta_pdf, progress_bar, root):
+def run_analysis_thread(ruta_pdf, excel_base, progress_bar, root):
     try:
         root.after(0, lambda: progress_bar.config(mode="indeterminate", style="blue.Horizontal.TProgressbar"))
         root.after(0, lambda: progress_bar.start())
 
         resultados, total_clausulas, encontradas_count = extraer_clausulas_por_titulo_mejorado(
-            ruta_pdf, EXCEL_BASE, progress_bar, root
+            ruta_pdf, excel_base, progress_bar, root
         )
 
         root.after(0, lambda: progress_bar.stop())
@@ -551,15 +545,15 @@ def elegir_ruta_guardado(ruta_pdf: str) -> str | None:
     )
     return ruta_destino if ruta_destino else None
 
-def seleccionar_pdf_y_procesar():
+def seleccionar_pdf_y_procesar(excel_base: str, ramo_label: StringVar):
     ruta_pdf = filedialog.askopenfilename(
-        title="Selecciona un archivo PDF",
+        title=f"Selecciona un archivo PDF ({ramo_label.get()})",
         filetypes=[("Archivos PDF", "*.pdf")]
     )
     if ruta_pdf:
         progress_bar.pack(pady=10)
         root.update_idletasks()
-        t = threading.Thread(target=run_analysis_thread, args=(ruta_pdf, progress_bar, root))
+        t = threading.Thread(target=run_analysis_thread, args=(ruta_pdf, excel_base, progress_bar, root))
         t.daemon = True
         t.start()
 
@@ -599,30 +593,44 @@ def mostrar_login():
 def mostrar_app():
     global root, progress_bar
     root = Tk()
-    root.title("Analizador de Cláusulas MRC - V 3.0")
+    root.title("Analizador de Cláusulas – MRC / Transporte (V 3.1)")
     try:
         root.iconbitmap('icono.ico')
     except:
         pass
-    root.geometry("800x380")
+    root.geometry("820x430")
 
-    Label(root, text="Analizador de Cláusulas MRC", font=("Arial", 16, "bold")).pack(pady=10)
-    Label(root, text="Obtén un reporte ordenado de todas las cláusulas incluidas en el documento.", font=("Arial", 11)).pack(pady=5)
-    Label(root, text="Versión 3.0", font=("Arial", 11)).pack(pady=5)
-    Label(root, text="Novedad: Ahora incluye la columna de observaciones del Excel base en el reporte final.", font=("Arial", 10)).pack(pady=5)
-    Label(root, text="Selecciona un archivo PDF para analizar", font=("Arial", 14)).pack(pady=20)
+    ramo_label = StringVar(value="(sin ramo)")
+    Label(root, text="Analizador de Cláusulas", font=("Arial", 16, "bold")).pack(pady=(12, 4))
+    Label(root, text="Compara títulos de un Excel base vs el PDF de la póliza.", font=("Arial", 11)).pack()
+    Label(root, text="Versión 3.1 (multi-ramo)", font=("Arial", 10)).pack(pady=(2, 8))
 
-    Button(root, text="Seleccionar PDF", command=seleccionar_pdf_y_procesar, font=("Arial", 12),
-           bg="#0070C0", fg="white", padx=20, pady=10).pack(pady=10)
+    # Botones de acción (dos ramas)
+    def _go_mrc():
+        ramo_label.set("MRC")
+        seleccionar_pdf_y_procesar(MRC_BASE, ramo_label)
 
+    def _go_tte():
+        ramo_label.set("Transporte")
+        seleccionar_pdf_y_procesar(TTE_BASE, ramo_label)
+
+    Button(root, text="📄 Analizar MRC", command=_go_mrc, font=("Arial", 12, "bold"),
+           bg="#0070C0", fg="white", padx=20, pady=10).pack(pady=(18, 6))
+
+    Button(root, text="🚚 Analizar Transporte", command=_go_tte, font=("Arial", 12, "bold"),
+           bg="#0B7F3F", fg="white", padx=20, pady=10).pack(pady=6)
+
+    Label(root, textvariable=ramo_label, font=("Arial", 10, "italic"), fg="gray").pack(pady=(4, 2))
+
+    # Barra de progreso (tema azul por defecto)
     style = ttk.Style()
     style.theme_use('default')
     style.configure("blue.Horizontal.TProgressbar", background='#0070C0', troughcolor='#e0e0e0')
 
-    progress_bar = ttk.Progressbar(root, orient="horizontal", length=300, mode="determinate",
+    progress_bar = ttk.Progressbar(root, orient="horizontal", length=320, mode="determinate",
                                    style="blue.Horizontal.TProgressbar")
 
-    Label(root, text="Nota: 'base_clausulas.xlsx' debe estar en la misma carpeta.", font=("Arial", 10), fg="gray").pack(pady=(10, 0))
+
 
     root.mainloop()
 
