@@ -663,9 +663,9 @@ def construir_app(root):
     root.geometry("860x420")
 
     Label(root, text="Analizador de Cláusulas – MRC", font=("Arial", 16, "bold")).pack(pady=10)
-    Label(root, text="Reporte ordenado de cláusulas incluidas en el documento.", font=("Arial", 11)).pack(pady=2)
-    Label(root, text="Matching Exacto/Robusto + Fallback Footer (misma lógica de Transporte)", font=("Arial", 10)).pack(pady=2)
-    Label(root, text="Selecciona un archivo PDF para analizar", font=("Arial", 14)).pack(pady=20)
+    Label(root, text="Reporte ordenado de cláusulas incluidas en el documento PDF.", font=("Arial", 11)).pack(pady=2)
+    Label(root, text="Matching Exacto/Robusto + Fallback Footer", font=("Arial", 10)).pack(pady=2)
+    Label(root, text="Selecciona un archivo PDF - MRC para analizar", font=("Arial", 14)).pack(pady=20)
 
     Button(root, text="Seleccionar PDF", command=seleccionar_pdf_y_procesar,
            font=("Arial", 12), bg="#0070C0", fg="white", padx=20, pady=10).pack(pady=10)
@@ -677,7 +677,7 @@ def construir_app(root):
     progress_bar = ttk.Progressbar(root, orient="horizontal", length=320,
                                    mode="determinate", style="blue.Horizontal.TProgressbar")
 
-    Label(root, text="Nota: 'base_clausulas.xlsx' debe estar en la misma carpeta del programa.", font=("Arial", 10), fg="gray").pack(pady=(10, 0))
+    Label(root, text="Nota: 'base_clausulas.xlsx' debe estar en la misma carpeta donde se ejecuta el programa.", font=("Arial", 10), fg="gray").pack(pady=(10, 0))
     root.protocol("WM_DELETE_WINDOW", root.quit)
 
 # -------- INICIO --------
