@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import re
 import threading
@@ -7,66 +8,61 @@ import pandas as pd
 
 from tkinter import filedialog, Tk, Button, Label, messagebox, Entry, Toplevel
 from tkinter import ttk
-from pdfminer.high_level import extract_text
+
+# Import robusto de pdfminer (igual Transporte)
+try:
+    from pdfminer.high_level import extract_text
+except Exception:
+    from pdfminer_high_level import extract_text  # type: ignore
+
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.worksheet.datavalidation import DataValidation
 import signal
+import sys  # PyInstaller
 
 # =========================
-# Configuración general
+# Configuración general (IGUAL TRANSPORTE)
 # =========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXCEL_BASE = os.path.join(BASE_DIR, "base_clausulas.xlsx")
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    BASE_DIR = sys._MEIPASS
+    RUNTIME_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    RUNTIME_DIR = BASE_DIR
+
+# Ruta del Excel base (prioriza el archivo junto al .exe)
+EXCEL_BASE = os.path.join(RUNTIME_DIR, "base_clausulas.xlsx")
+if not os.path.isfile(EXCEL_BASE):
+    EXCEL_BASE = os.path.join(BASE_DIR, "base_clausulas.xlsx")
 
 # Silenciar mensajes ruidosos de pdfminer
 for name in ["pdfminer", "pdfminer.layout", "pdfminer.converter", "pdfminer.image", "pdfminer.pdfinterp"]:
     logging.getLogger(name).setLevel(logging.ERROR)
 
 # =========================
-# Normalización y utilidades
+# Normalización y utilidades (IGUAL TRANSPORTE)
 # =========================
-IGNORE_TOKENS = {
-    "nro", "numero", "no", "opcionales", "opcional", "plan",
-    "sub", "sublimite", "sublimites", "sub-limite", "sub-limites",
-    "lote", "anexo", "anexos"
-}
-
-TITLE_ANCHORS = (
-    "amparo|clausula|cláusula|asistencia|lucro|sustraccion|sustracción|equipo|equipos|maquinaria|"
-    "terremoto|asonada|responsabilidad|rotura|definicion|definición|obras|arte|reposicion|reposición|"
-    "archivo|archivos|hurto|incendio|explosion|explosión|robo|electric|eléctric|averia|avería|terceros|dan[oó]|"
-    "gasto|gastos|arrendamiento|incremento|condiciones|generales|limite|límite"
-)
-
-STOP_WORDS = {
-    "de", "del", "la", "el", "los", "las", "y", "o", "por", "para", "en", "a", "con", "sin",
-    "amparo", "clausula", "clausulas", "cláusula", "cláusulas", "nro", "opcional", "opcion", "opciones"
-}
-
 PAGE_BREAK = "\f"  # \x0c
-
 
 def strip_accents(s: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
-
 
 def normalize_spaces_keep_newlines(s: str) -> str:
     s = re.sub(r'[ \t\r\f\v]+', ' ', s)
     s = re.sub(r' ?\n ?', '\n', s)
     return s
 
-
 def fix_hyphen_linebreaks(s: str) -> str:
     return re.sub(r'-\s*\n\s*', '', s)
 
-
 def fix_spaced_caps(s: str) -> str:
-    def join_spaced_caps(m): return m.group(0).replace(' ', '')
+    def join_spaced_caps(m):
+        return m.group(0).replace(' ', '')
     pattern = r'(?:(?<=\s)|^)(?:[A-ZÁÉÍÓÚÑ]\s){3,}[A-ZÁÉÍÓÚÑ](?=\s|[,.;:()\-\n]|$)'
     return re.sub(pattern, join_spaced_caps, s)
-
 
 def repair_upper_sequences(pdf_text: str) -> str:
     parts = pdf_text.split(PAGE_BREAK)
@@ -88,9 +84,8 @@ def repair_upper_sequences(pdf_text: str) -> str:
         repaired_pages.append('\n'.join(out))
     return PAGE_BREAK.join(repaired_pages)
 
-
 def normalize_pdf_text(pdf_path: str):
-    raw = extract_text(pdf_path)  # conserva \f si el PDF indica salto de página
+    raw = extract_text(pdf_path)
     step1 = fix_hyphen_linebreaks(raw)
     step2 = repair_upper_sequences(step1)
     step3 = fix_spaced_caps(step2)
@@ -100,14 +95,12 @@ def normalize_pdf_text(pdf_path: str):
     norm_compact = re.sub(r'\s+', ' ', norm_lines.replace(PAGE_BREAK, ' ')).strip()
     return repaired_text, norm_lines, norm_compact
 
-
 def _cut_after_line(text: str, pos_end: int) -> str:
     line_end = text.find('\n', pos_end)
     if line_end == -1:
         line_end = len(text)
     cut_pos = min(line_end + 1, len(text))
     return text[cut_pos:]
-
 
 def crop_from_cp_and_clausulas(repaired_text: str):
     raw = repaired_text
@@ -127,76 +120,65 @@ def crop_from_cp_and_clausulas(repaired_text: str):
     norm_compact = re.sub(r'\s+', ' ', norm_lines.replace(PAGE_BREAK, ' ')).strip()
     return raw, norm_lines, norm_compact
 
-
-def normalized_plain_strict(s: str) -> str:
-    s = strip_accents(s.lower()); s = re.sub(r'[^a-z0-9]+', ' ', s)
-    return re.sub(r'\s+', ' ', s).strip()
-
-
-def singularize_token(tok: str) -> str:
-    if len(tok) > 4 and tok.endswith('s'):
-        return tok[:-1]
-    return tok
-
-
-def normalized_plain_canonical(s: str) -> str:
-    s = strip_accents(s.lower()); s = re.sub(r'[/-]', ' ', s); s = re.sub(r'[^a-z0-9 ]+', ' ', s)
-    toks = [t for t in s.split() if t and t not in IGNORE_TOKENS]
-    return ' '.join(singularize_token(t) for t in toks).strip()
-
-
-def first_sig_token(s: str) -> str:
-    toks = [t for t in normalized_plain_canonical(s).split() if t not in STOP_WORDS]
-    return toks[0] if toks else ""
-
-
-def has_title_anchor(s: str) -> bool:
-    return re.search(r'\b(?:' + TITLE_ANCHORS + r')\b', s) is not None
+def normalized_basic(s: str) -> str:
+    s = strip_accents(s.lower())
+    s = re.sub(r'\s+', ' ', s)
+    return s.strip()
 
 
 # =========================
-# Detección de CUERPO
+# Tokens útiles (SOLO MRC) para evitar falsos positivos
+# - No contamos palabras genéricas (ej. "amparo") para el Jaccard,
+#   porque disparan coincidencias falsas como "Amparo animales vivos".
+# =========================
+GENERIC_TOKENS = {
+    "amparo", "clausula", "cláusula", "clausulas", "cláusulas", "cobertura",
+    "condicion", "condiciones", "general", "generales", "particular", "particulares",
+    "anexo", "anexos", "seccion", "secciones"
+}
+
+STRICT_EXACT_TITLES = {
+    # Evita falsos positivos: SOLO se marca si existe coincidencia EXACTA
+    "amparo animales vivos",
+}
+
+def tokens_utiles(s: str) -> set:
+    toks = normalized_basic(s).split()
+    return {t for t in toks if t not in GENERIC_TOKENS}
+
+# =========================
+# Detección de CUERPO / títulos (IGUAL TRANSPORTE)
 # =========================
 def is_body_line(s: str) -> bool:
     T = s.strip().lower()
-    if re.match(r'^\s*\d+\)\s', T):  # 1) 2) 3) ...
+    if re.match(r'^\s*\d+\)\s', T):
         return True
-    if re.search(r'[$€%]|vigencia|por\s+evento|deducible|prima', T):
-        return True
-    if T.endswith('.') and len(T.split()) >= 10:
+    if T.endswith('.') and len(T.split()) >= 18:
         return True
     return False
 
-
-# ====== Filtro de "parece título"
 def is_title_like(norm_text: str) -> bool:
     T = norm_text.strip()
-    if len(T) < 6 or len(T) > 320:
-        return False
-    if T.count('.') > 8:
+    if len(T) < 4 or len(T) > 320:
         return False
     if re.match(r'^\d+\)\s', T):
         return False
-    if re.search(r'[$€]|vigencia|por\s+evento|prima|deducible', T):
+    if T.endswith('.') and len(T.split()) >= 18:
         return False
-    if T.endswith('.') and len(T.split()) >= 12:
-        return False
-    if re.search(r'(^|\s)\d+\.\s', T):  # "1. Amparo"
-        return True
-    if has_title_anchor(T):
-        return True
-    if T.isupper() and len(T.split()) <= 12:
-        return True
-    return False
-
+    return True
 
 # =========================
 # Candidatos (combos dentro de página)
 # =========================
 def build_title_candidates(norm_lines: str, repaired_text: str, max_lines_combo=5):
     rep_lines = repaired_text.split('\n')
-    norm_lns = norm_lines.split('\n')
-    assert len(rep_lines) == len(norm_lns)
+    norm_lns  = norm_lines.split('\n')
+
+    # Transporte usaba assert; aquí lo hacemos tolerante
+    if len(rep_lines) != len(norm_lns):
+        N = min(len(rep_lines), len(norm_lns))
+        rep_lines = rep_lines[:N]
+        norm_lns  = norm_lns[:N]
 
     line_starts, acc = [], 0
     for s in rep_lines:
@@ -204,6 +186,7 @@ def build_title_candidates(norm_lines: str, repaired_text: str, max_lines_combo=
 
     cand = []
     N = len(rep_lines)
+
     for i in range(N):
         base_norm = norm_lns[i].strip()
         if not base_norm:
@@ -221,26 +204,25 @@ def build_title_candidates(norm_lines: str, repaired_text: str, max_lines_combo=
             combo_norm = ' '.join(norm_lns[i:j+1]).strip()
             if not is_title_like(combo_norm):
                 continue
+
             combo_orig = ' '.join(rep_lines[i:j+1]).strip()
-            if combo_orig.strip().endswith('.') and len(combo_orig.split()) >= 12:
+            if combo_orig.strip().endswith('.') and len(combo_orig.split()) >= 18:
                 continue
 
             cand.append({
-                'text_strict': normalized_plain_strict(combo_norm),
-                'text_canon': normalized_plain_canonical(combo_norm),
+                'text_basic': normalized_basic(combo_norm),
                 'pos': line_starts[i],
                 'orig': re.sub(r'\s+', ' ', combo_orig)
             })
 
     seen, uniq = set(), []
     for c in cand:
-        key = (c['text_strict'], c['pos'])
+        key = (c['text_basic'], c['pos'])
         if key not in seen:
             seen.add(key); uniq.append(c)
 
     uniq.sort(key=lambda x: x['pos'])
     return uniq
-
 
 def jaccard(a: set, b: set) -> float:
     if not a or not b:
@@ -248,66 +230,58 @@ def jaccard(a: set, b: set) -> float:
     inter = len(a & b); union = len(a | b)
     return inter / union if union else 0.0
 
-
 # =========================
-# Matching principal (exacto + robusto)
+# Matching (IGUAL TRANSPORTE)
 # =========================
 def match_titles_against_candidates(titles: list, candidates: list):
     results = []
     used_candidates = set()
-    titles_map = {}
 
+    titles_map = {}
     for idx, title in enumerate(titles):
-        t_canon = normalized_plain_canonical(title)
-        if t_canon:
-            titles_map[t_canon] = idx
+        t_key = normalized_basic(title)
+        if t_key:
+            titles_map.setdefault(t_key, []).append(idx)
 
     found_map = {}
 
     # Exactos
     for c_idx, c in enumerate(candidates):
-        cc = c['text_canon']
-        if cc in titles_map and c_idx not in used_candidates:
-            t_idx = titles_map[cc]
-            if t_idx not in found_map:
-                found_map[t_idx] = {'found': True, 'pos': c['pos'], 'obs': "Exacta", 'used_idx': c_idx}
-                used_candidates.add(c_idx)
+        key = c['text_basic']
+        if key in titles_map and c_idx not in used_candidates:
+            for t_idx in titles_map[key]:
+                if t_idx not in found_map:
+                    found_map[t_idx] = {'pos': c['pos'], 'obs': "Exacta", 'used_idx': c_idx}
+                    used_candidates.add(c_idx)
+                    break
 
-    # Robustos
+    # Robustos (Jaccard 0.60)
     for t_idx, title in enumerate(titles):
         if t_idx in found_map:
             continue
-        t_can = normalized_plain_canonical(title)
-        if not t_can or len(t_can) < 20:
+        t_key = normalized_basic(title)
+        if t_key in STRICT_EXACT_TITLES:
             continue
-        t_tokens = set(t_can.split())
-        fst_t = first_sig_token(title)
-        best = None
 
+        t_tokens = tokens_utiles(title)
+        if not t_tokens:
+            t_tokens = set(normalized_basic(title).split())
+        best = None
         for c_idx, c in enumerate(candidates):
             if c_idx in used_candidates:
                 continue
-            cc = c['text_canon']
-            if len(cc) < 20:
-                continue
-            if not has_title_anchor(cc):
-                continue
-            if c['orig'].strip().endswith('.') and len(c['orig'].split()) >= 12:
-                continue
-            if is_body_line(c['orig']):
-                continue
-            fst_c = first_sig_token(c['orig'])
-            if not fst_t or fst_t != fst_c:
-                continue
-            jac = jaccard(t_tokens, set(cc.split()))
-            if jac >= 0.90:
+            # tokens útiles: usamos el texto original del candidato para no perder palabras
+            c_tokens = tokens_utiles(c.get('orig', c['text_basic']))
+            if not c_tokens:
+                c_tokens = set(c['text_basic'].split())
+            jac = jaccard(t_tokens, c_tokens)
+            if jac >= 0.60:
                 score = jac
                 if (best is None) or (score > best[0]) or (score == best[0] and c['pos'] < best[2]['pos']):
                     best = (score, c_idx, c)
-
         if best is not None:
             _, c_idx, c = best
-            found_map[t_idx] = {'found': True, 'pos': c['pos'], 'obs': "Robusta", 'used_idx': c_idx}
+            found_map[t_idx] = {'pos': c['pos'], 'obs': "Robusta", 'used_idx': c_idx}
             used_candidates.add(c_idx)
 
     for idx, _ in enumerate(titles):
@@ -316,70 +290,83 @@ def match_titles_against_candidates(titles: list, candidates: list):
             results.append((True, r['pos'], r['obs']))
         else:
             results.append((False, float('inf'), "No"))
-
     return results
 
-
-# =========================
-# NUEVO: Fallback de “pie de página”
-# =========================
-def fallback_footer_titles(titles, repaired_text, already_matched, last_k_lines=6):
-    """
-    Revisa las últimas K líneas con texto de cada página.
-    Si una línea breve con anclas de título contiene (o casi contiene) la versión canónica del
-    título del Excel, la marca como encontrada.
-    """
+def fallback_footer_titles(titles, repaired_text, already_matched, last_k_lines=8):
     found = {}
     pages = repaired_text.split(PAGE_BREAK)
     pos_global = 0
 
+    def nbasic(s):
+        return normalized_basic(s)
+
     for page in pages:
         rep_lines = page.split('\n')
 
-        # posiciones de inicio por línea para devolver 'pos'
         line_starts, acc = [], 0
         for s in rep_lines:
-            line_starts.append(acc); acc += len(s) + 1
+            line_starts.append(acc)
+            acc += len(s) + 1
 
-        # índices de líneas no vacías
         non_empty = [i for i, ln in enumerate(rep_lines) if ln.strip()]
         footer_idx = non_empty[-last_k_lines:] if non_empty else []
 
         for i in footer_idx:
             line = rep_lines[i].strip()
-            if not line:
-                continue
-            if is_body_line(line):
-                continue
-            line_can = normalized_plain_canonical(line)
-
-            # debe parecer encabezado (anclas)
-            if not has_title_anchor(line_can):
+            if not line or is_body_line(line):
                 continue
 
-            line_set = set(line_can.split())
+            c_tokens = tokens_utiles(line)
+            if not c_tokens:
+                c_tokens = set(nbasic(line).split())
+
             for t_idx, title in enumerate(titles):
+                # Títulos "estrictos": NO pasan por footer (solo exactos)
+                t_key = nbasic(title)
+                if t_key in STRICT_EXACT_TITLES:
+                    continue
+
                 if already_matched[t_idx] or t_idx in found:
                     continue
-                t_can = normalized_plain_canonical(title)
-                if not t_can:
-                    continue
 
-                # 1) Contiene exacto (canónico) o
-                # 2) Muy similar por Jaccard (>=0.90)
-                if (t_can in line_can) or (jaccard(set(t_can.split()), line_set) >= 0.90):
+                t_tokens = tokens_utiles(title)
+                if not t_tokens:
+                    t_tokens = set(nbasic(title).split())
+
+                if jaccard(t_tokens, c_tokens) >= 0.60:
                     found[t_idx] = (pos_global + line_starts[i], "Footer")
 
-        # avanzar offset global (simula \f)
         pos_global += sum(len(s) + 1 for s in rep_lines) + 1
 
     return found
 
+# =========================
+# Extra MRC: Valor asegurado (PDF) (opcional)
+# =========================
+_MONEY_RE = re.compile(
+    r'(?:(?:cop|col)\s*)?\$?\s*\d{1,3}(?:\.\d{3})+(?:,\d{2})?'
+    r'|\$?\s*\d{1,3}(?:,\d{3})+(?:\.\d{2})?'
+    r'|\b\d{1,3}\s*%\b'
+    r'|\b\d+\s*(?:smmlv|smdlv)\b',
+    flags=re.IGNORECASE
+)
+
+def extraer_valor_asegurado_pdf(repaired_text: str, pos: int, window: int = 1400) -> str:
+    if pos is None or pos == float('inf'):
+        return ""
+    chunk = repaired_text[pos: pos + window]
+    chunk_low = strip_accents(chunk.lower())
+    chunk_low = re.sub(r'pagina\s+\d+\s+de\s+\d+', ' ', chunk_low)
+    m = _MONEY_RE.search(chunk_low)
+    if not m:
+        return ""
+    # devolvemos el match sobre chunk_low, normalizando espacios
+    return re.sub(r'\s+', ' ', m.group(0)).strip()
 
 # =========================
-# Motor principal
+# Motor principal (MRC) - con mismo "Índice de Orden" real del PDF
 # =========================
-def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, root):
+def extraer_clausulas_por_titulo_mrc(pdf_path, excel_base, progress_bar, root):
     if not os.path.exists(excel_base):
         messagebox.showerror("Error", f"No se encuentra el archivo:\n{excel_base}")
         return [], 0, 0
@@ -390,20 +377,26 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
         messagebox.showerror("Error", f"No se pudo leer el Excel:\n{e}")
         return [], 0, 0
 
-    # Validaciones mínimas (Observaciones es opcional)
-    if "Multiriesgo Corporativo" not in df.columns or "Texto de la cláusula" not in df.columns:
-        messagebox.showerror("Error", "El Excel debe tener 'Multiriesgo Corporativo' y 'Texto de la cláusula'.")
+    # Columna de título MRC (obligatoria)
+    col_titulo = "Multiriesgo Corporativo" if "Multiriesgo Corporativo" in df.columns else None
+    if col_titulo is None or "Texto de la cláusula" not in df.columns:
+        messagebox.showerror(
+            "Error",
+            "El Excel base debe tener:\n- 'Multiriesgo Corporativo'\n- 'Texto de la cláusula'"
+        )
         return [], 0, 0
 
-    titles = df["Multiriesgo Corporativo"].fillna("").astype(str).tolist()
-    texts = df["Texto de la cláusula"].fillna("").astype(str).tolist()
+    titles = df[col_titulo].fillna("").astype(str).tolist()
+    texts  = df["Texto de la cláusula"].fillna("").astype(str).tolist()
 
-    # NUEVO: Observaciones del Excel base (si no existe, lista vacía con cadenas)
-    if "Observaciones" in df.columns:
-        base_obs = df["Observaciones"].fillna("").astype(str).tolist()
-    else:
-        base_obs = [""] * len(titles)
+    # Columnas extra del base (se arrastran tal cual)
+    base_tipo  = df["Tipo de operación"].fillna("").astype(str).tolist() if "Tipo de operación" in df.columns else [""] * len(titles)
+    base_valor = df["Valor asegurado"].fillna("").astype(str).tolist() if "Valor asegurado" in df.columns else [""] * len(titles)
+    base_obs   = df["Observaciones"].fillna("").astype(str).tolist() if "Observaciones" in df.columns else [""] * len(titles)
+    base_lucro = df["SOLO PARA LUCRO"].fillna("").astype(str).tolist() if "SOLO PARA LUCRO" in df.columns else [""] * len(titles)
+    base_aclar = df["ACLARACIONES "].fillna("").astype(str).tolist() if "ACLARACIONES " in df.columns else [""] * len(titles)
 
+    # PDF
     try:
         repaired_text, _, _ = normalize_pdf_text(pdf_path)
     except Exception as e:
@@ -411,11 +404,12 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
         return [], 0, 0
 
     repaired_text, norm_lines, _ = crop_from_cp_and_clausulas(repaired_text)
+
     candidates = build_title_candidates(norm_lines, repaired_text, max_lines_combo=5)
     matches = match_titles_against_candidates(titles, candidates)
 
     already = [f for (f, _, _) in matches]
-    footer_hits = fallback_footer_titles(titles, repaired_text, already, last_k_lines=6)
+    footer_hits = fallback_footer_titles(titles, repaired_text, already, last_k_lines=8)
 
     final_matches = []
     for idx, (f, p, o) in enumerate(matches):
@@ -425,19 +419,24 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
         else:
             final_matches.append((f, p, o))
 
+    # Índice de Orden real por aparición (IGUAL Transporte)
+    found_positions = [(i, m[1]) for i, m in enumerate(final_matches) if m[0]]
+    found_positions.sort(key=lambda x: x[1])
+    rank_by_tidx = {t_idx: rank for rank, (t_idx, _) in enumerate(found_positions, start=1)}
+
     resultados = []
-    found_counter = 1
     found_total = 0
 
     for idx, ((found, pos, obs), title, txt) in enumerate(zip(final_matches, titles, texts)):
         if found:
             found_total += 1
-            indice = found_counter; found_counter += 1
+            indice = rank_by_tidx.get(idx, "N/A")
+            valor_pdf = extraer_valor_asegurado_pdf(repaired_text, pos)
         else:
-            indice = "N/A"; pos = float('inf'); obs = ""
-
-        # OBSERVACIONES ahora viene del Excel base
-        obs_base = base_obs[idx] if idx < len(base_obs) else ""
+            indice = "N/A"
+            pos = float('inf')
+            obs = ""
+            valor_pdf = ""
 
         resultados.append({
             "Indice de Orden": indice,
@@ -445,11 +444,8 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
             "Texto de la cláusula": txt,
             "Encontrado": "Sí" if found else "No",
             "Tipo de operación": "",
-            "Valor Asegurado": "",
-            # Observaciones del Excel base
-            "Observaciones": obs_base,
-            # NUEVO: tu señal (Exacta/Robusta/Footer) se mueve a "Compatibilidad"
-            "Compatibilidad": obs,
+            "Observaciones": base_obs[idx] if idx < len(base_obs) else "",
+            "Compatibilidad": obs,  # Exacta / Robusta / Footer
             "Posicion": pos,
             "OrdenBase": idx
         })
@@ -457,24 +453,22 @@ def extraer_clausulas_por_titulo_mejorado(pdf_path, excel_base, progress_bar, ro
     resultados.sort(key=lambda x: (x["Encontrado"] != "Sí", x["Posicion"], x["OrdenBase"]))
     return resultados, len(titles), found_total
 
-
 # =========================
-# Guardado en Excel (tabla SIN color de fondo; encabezado azul)
+# Guardado en Excel (estilo transporte)
 # =========================
 def guardar_resultados_en_excel(resultados, nombre_salida):
     df_salida = pd.DataFrame(resultados)
 
-    # Agregamos "Compatibilidad" al final y mantenemos "Observaciones" (del base)
     columnas_finales = [
         "Indice de Orden",
         "Multiriesgo Corporativo",
         "Texto de la cláusula",
-        "Encontrado",
         "Tipo de operación",
-        "Valor Asegurado",
-        "Observaciones",     # del Excel base
-        "Compatibilidad"     # Exacta / Robusta / Footer (tu métrica)
+        "Observaciones",
+        "Encontrado",
+        "Compatibilidad"
     ]
+    # Compat: en el base había "ACLARACIONES " con espacio; aquí ya lo normalizamos a "ACLARACIONES"
     df_salida = df_salida[columnas_finales]
     df_salida.to_excel(nombre_salida, index=False)
 
@@ -501,8 +495,7 @@ def guardar_resultados_en_excel(resultados, nombre_salida):
         cell.fill = fill_header
         cell.alignment = align_center
 
-    # Añadimos un ancho extra para "Compatibilidad"
-    widths = [15, 40, 100, 15, 20, 20, 25, 20]
+    widths = [15, 40, 105, 22, 30, 12, 18]
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
@@ -511,20 +504,42 @@ def guardar_resultados_en_excel(resultados, nombre_salida):
             cell.font = font_body
             cell.alignment = align_center
         ws.row_dimensions[row[0].row].height = 60
+    # Lista desplegable para "Tipo de operación" (sin depender de separadores regionales)
+    # Creamos una hoja oculta con las opciones y referenciamos el rango.
+    try:
+        if "Listas" in wb.sheetnames:
+            ws_listas = wb["Listas"]
+            # limpiar rango A1:A5
+            for r in range(1, 6):
+                ws_listas.cell(row=r, column=1).value = None
+        else:
+            ws_listas = wb.create_sheet("Listas")
+
+        opciones = ["Ajustar", "Cubre", "Incluir", "No aplica", "Retirar"]
+        for i, val in enumerate(opciones, start=1):
+            ws_listas.cell(row=i, column=1, value=val)
+
+        # Ocultar hoja
+        ws_listas.sheet_state = "hidden"
+
+        dv = DataValidation(type="list", formula1="=Listas!$A$1:$A$5", allow_blank=True)
+        ws.add_data_validation(dv)
+        dv.add(f"D2:D{ws.max_row}")
+    except Exception:
+        pass
 
     wb.save(nombre_salida)
     return nombre_salida
 
-
 # =========================
-# Hilo y GUI
+# Hilo y GUI (igual transporte)
 # =========================
 def run_analysis_thread(ruta_pdf, progress_bar, root):
     try:
         root.after(0, lambda: progress_bar.config(mode="indeterminate", style="blue.Horizontal.TProgressbar"))
         root.after(0, lambda: progress_bar.start())
 
-        resultados, total_clausulas, encontradas_count = extraer_clausulas_por_titulo_mejorado(
+        resultados, total_clausulas, encontradas_count = extraer_clausulas_por_titulo_mrc(
             ruta_pdf, EXCEL_BASE, progress_bar, root
         )
 
@@ -572,12 +587,12 @@ def run_analysis_thread(ruta_pdf, progress_bar, root):
     finally:
         root.after(100, lambda: progress_bar.pack_forget())
 
-
 def elegir_ruta_guardado(ruta_pdf: str) -> str | None:
     carpeta_pdf = os.path.dirname(ruta_pdf)
     pdf_nombre = os.path.basename(ruta_pdf)
-    nombre_sin_prefijo = pdf_nombre.replace("30_Sura_", "")
-    nombre_sugerido = os.path.splitext(nombre_sin_prefijo)[0] + ".xlsx"
+    # Mismo patrón que Transporte (quita prefijo 00_Sura_)
+    nombre_sin_prefijo = re.sub(r'^\d{2}_(Sura|SURA)_', '', pdf_nombre)
+    nombre_sugerido = os.path.splitext(nombre_sin_prefijo)[0] + "_MRC.xlsx"
 
     ruta_destino = filedialog.asksaveasfilename(
         title="Guardar resultados como...",
@@ -588,7 +603,6 @@ def elegir_ruta_guardado(ruta_pdf: str) -> str | None:
         confirmoverwrite=True
     )
     return ruta_destino if ruta_destino else None
-
 
 def seleccionar_pdf_y_procesar():
     ruta_pdf = filedialog.askopenfilename(
@@ -602,15 +616,19 @@ def seleccionar_pdf_y_procesar():
         t.daemon = True
         t.start()
 
-
 def mostrar_login(root, on_success):
     login_win = Toplevel(root)
     login_win.title("Acceso")
     login_win.geometry("300x180")
     login_win.configure(bg="#0070C0")
     login_win.grab_set()
+
+    # Intentar cargar el ícono (prioriza el que está junto al .exe)
     try:
-        login_win.iconbitmap(os.path.join(BASE_DIR, "icono.ico"))
+        ico_path = os.path.join(RUNTIME_DIR, "icono.ico")
+        if not os.path.isfile(ico_path):
+            ico_path = os.path.join(BASE_DIR, "icono.ico")
+        login_win.iconbitmap(ico_path)
     except Exception:
         pass
 
@@ -635,20 +653,18 @@ def mostrar_login(root, on_success):
 
     login_win.bind("<Return>", lambda e: verificar())
 
-
 def construir_app(root):
     global progress_bar
-    root.title("Analizador de Cláusulas MRC - V 3.0")
+    root.title("Analizador de Cláusulas – MRC")
     try:
         root.iconbitmap(os.path.join(BASE_DIR, 'icono.ico'))
     except Exception:
         pass
-    root.geometry("800x380")
+    root.geometry("860x420")
 
-    Label(root, text="Analizador de Cláusulas MRC", font=("Arial", 16, "bold")).pack(pady=10)
-    Label(root, text="Obtén un reporte ordenado de todas las cláusulas incluidas en el documento.", font=("Arial", 11)).pack(pady=5)
-    Label(root, text="Versión 3.0", font=("Arial", 11)).pack(pady=5)
-    Label(root, text="Novedad: Ahora incluye la columna de observaciones del Excel base en el reporte final.", font=("Arial", 10)).pack(pady=5)
+    Label(root, text="Analizador de Cláusulas – MRC", font=("Arial", 16, "bold")).pack(pady=10)
+    Label(root, text="Reporte ordenado de cláusulas incluidas en el documento.", font=("Arial", 11)).pack(pady=2)
+    Label(root, text="Matching Exacto/Robusto + Fallback Footer (misma lógica de Transporte)", font=("Arial", 10)).pack(pady=2)
     Label(root, text="Selecciona un archivo PDF para analizar", font=("Arial", 14)).pack(pady=20)
 
     Button(root, text="Seleccionar PDF", command=seleccionar_pdf_y_procesar,
@@ -658,18 +674,16 @@ def construir_app(root):
     style.theme_use('default')
     style.configure("blue.Horizontal.TProgressbar", background='#0070C0', troughcolor='#e0e0e0')
 
-    progress_bar = ttk.Progressbar(root, orient="horizontal", length=300,
+    progress_bar = ttk.Progressbar(root, orient="horizontal", length=320,
                                    mode="determinate", style="blue.Horizontal.TProgressbar")
 
-    Label(root, text="Nota: 'base_clausulas.xlsx' debe estar en la misma carpeta.", font=("Arial", 10), fg="gray").pack(pady=(10, 0))
-
+    Label(root, text="Nota: 'base_clausulas.xlsx' debe estar en la misma carpeta del programa.", font=("Arial", 10), fg="gray").pack(pady=(10, 0))
     root.protocol("WM_DELETE_WINDOW", root.quit)
-
 
 # -------- INICIO --------
 if __name__ == "__main__":
     root = Tk()
-    root.withdraw()  # ocultamos mientras el login
+    root.withdraw()
 
     def on_login_ok():
         root.deiconify()
@@ -677,7 +691,6 @@ if __name__ == "__main__":
 
     mostrar_login(root, on_login_ok)
 
-    # Ctrl+C cierra sin traceback
     try:
         signal.signal(signal.SIGINT, lambda *args: root.quit())
     except Exception:
