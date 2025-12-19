@@ -444,6 +444,7 @@ def extraer_clausulas_por_titulo_mrc(pdf_path, excel_base, progress_bar, root):
             "Texto de la cláusula": txt,
             "Encontrado": "Sí" if found else "No",
             "Tipo de operación": "",
+            "Valor asegurado": base_valor[idx] if idx < len(base_valor) else "",
             "Observaciones": base_obs[idx] if idx < len(base_obs) else "",
             "Compatibilidad": obs,  # Exacta / Robusta / Footer
             "Posicion": pos,
@@ -464,6 +465,7 @@ def guardar_resultados_en_excel(resultados, nombre_salida):
         "Multiriesgo Corporativo",
         "Texto de la cláusula",
         "Tipo de operación",
+        "Valor asegurado",
         "Observaciones",
         "Encontrado",
         "Compatibilidad"
@@ -495,7 +497,7 @@ def guardar_resultados_en_excel(resultados, nombre_salida):
         cell.fill = fill_header
         cell.alignment = align_center
 
-    widths = [15, 40, 105, 22, 30, 12, 18]
+    widths = [15, 40, 105, 22, 20, 30, 12, 18]
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
